@@ -30,8 +30,8 @@ async def get_system_status():
     """
     result = {
         "backend": {"status": "online", "timestamp": datetime.now().isoformat()},
-        "llm": {"status": "unknown", "model": None, "testable": True},
-        "embeddings": {"status": "unknown", "model": None, "testable": True},
+        "llm": {"status": "unknown", "model": None, "testable": True, "base_url": None},
+        "embeddings": {"status": "unknown", "model": None, "testable": True, "base_url": None},
         "tts": {"status": "unknown", "model": None, "testable": True},
     }
 
@@ -44,6 +44,7 @@ async def get_system_status():
 
         llm_config = get_llm_config()
         result["llm"]["model"] = llm_config.get("model")
+        result["llm"]["base_url"] = llm_config.get("base_url")
         result["llm"]["status"] = "configured"
     except ValueError as e:
         result["llm"]["status"] = "not_configured"
@@ -58,6 +59,7 @@ async def get_system_status():
 
         embedding_config = get_embedding_config()
         result["embeddings"]["model"] = embedding_config.get("model")
+        result["embeddings"]["base_url"] = embedding_config.get("base_url")
         result["embeddings"]["status"] = "configured"
     except ValueError as e:
         result["embeddings"]["status"] = "not_configured"

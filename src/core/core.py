@@ -59,15 +59,21 @@ def get_llm_config() -> dict:
     # Validate required configuration
     if not model:
         raise ValueError("Error: LLM_MODEL not set, please configure it in .env file")
-    if not api_key:
-        raise ValueError("Error: LLM_BINDING_API_KEY not set, please configure it in .env file")
+
+    # Ollama local compatibility: allow empty api_key and default base_url
+    is_ollama = (binding or "").lower() == "ollama" or (base_url or "").find("11434") != -1
+    if not base_url:
+        base_url = "http://localhost:11434/v1" if is_ollama else None
     if not base_url:
         raise ValueError("Error: LLM_BINDING_HOST not set, please configure it in .env file")
+    # For local Ollama, api_key can be empty
+    if not api_key and not is_ollama:
+        raise ValueError("Error: LLM_BINDING_API_KEY not set, please configure it in .env file")
 
     return {
         "binding": binding,
         "model": model,
-        "api_key": api_key,
+        "api_key": api_key or "",
         "base_url": base_url,
     }
 
@@ -191,12 +197,15 @@ def get_embedding_config() -> dict:
     # Strict mode: All model configuration must come from .env, no automatic fallback or default inference
     if not model:
         raise ValueError("Error: EMBEDDING_MODEL not set, please configure it in .env file")
-    if not api_key:
+    is_ollama = (binding or "").lower() == "ollama" or (base_url or "").find("11434") != -1
+    if not base_url:
+        base_url = "http://localhost:11434/v1" if is_ollama else None
+    if not base_url:
+        raise ValueError("Error: EMBEDDING_BINDING_HOST not set, please configure it in .env file")
+    if not api_key and not is_ollama:
         raise ValueError(
             "Error: EMBEDDING_BINDING_API_KEY not set, please configure it in .env file"
         )
-    if not base_url:
-        raise ValueError("Error: EMBEDDING_BINDING_HOST not set, please configure it in .env file")
 
     # Get optional configuration
     dim = _to_int(_strip_value(os.getenv("EMBEDDING_DIM")), 3072)
@@ -205,11 +214,49 @@ def get_embedding_config() -> dict:
     return {
         "binding": binding,
         "model": model,
-        "api_key": api_key,
+        "api_key": api_key or "",
         "base_url": base_url,
         "dim": dim,
         "max_tokens": max_tokens,
     }
+
+# ============================================================================
+# Client Factories
+# ============================================================================
+try:
+    from openai import AsyncOpenAI, OpenAI
+except Exception:
+    AsyncOpenAI = None
+    OpenAI = None
+
+
+def _safe_api_key_for_local(base_url: str, api_key: str | None) -> str | None:
+    """
+    Return a safe api_key for clients.
+    When pointing to local Ollama, allow empty key by substituting a harmless placeholder.
+    """
+    if base_url and "11434" in base_url and (api_key is None or api_key.strip() == ""):
+        return "NA"
+    return api_key
+
+
+def get_llm_client(api_key: str | None = None, base_url: str | None = None):
+    """
+    Create AsyncOpenAI client using unified configuration and safe defaults for local Ollama.
+    """
+    cfg = get_llm_config()
+    use_api_key = _safe_api_key_for_local(base_url or cfg["base_url"], api_key or cfg["api_key"])
+    client = AsyncOpenAI(api_key=use_api_key, base_url=base_url or cfg["base_url"]) if AsyncOpenAI else None
+    return client
+
+
+def get_tts_client(api_key: str | None = None, base_url: str | None = None):
+    """
+    Create OpenAI client for TTS using unified configuration.
+    """
+    cfg = get_tts_config()
+    client = OpenAI(api_key=api_key or cfg["api_key"], base_url=base_url or cfg["base_url"]) if OpenAI else None
+    return client
 
 
 # ============================================================================

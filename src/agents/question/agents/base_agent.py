@@ -21,7 +21,7 @@ load_dotenv(override=False)
 project_root = Path(__file__).parent.parent.parent.parent.parent
 sys.path.insert(0, str(project_root))
 
-from src.core.core import get_agent_params
+from src.core.core import get_agent_params, get_llm_client
 from src.core.logging import get_logger
 
 # Module logger
@@ -104,7 +104,10 @@ class BaseAgent(ABC):
             model = os.getenv("LLM_MODEL", "gpt-4o")
         self.model = model
 
-        self.client = AsyncOpenAI(api_key=api_key, base_url=base_url)
+        # Use unified client factory (supports local Ollama without API key)
+        self.client = get_llm_client(api_key=api_key, base_url=base_url) or AsyncOpenAI(
+            api_key=api_key or "NA", base_url=base_url
+        )
         self.api_key = api_key
         self.base_url = base_url
 

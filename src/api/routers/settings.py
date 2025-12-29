@@ -12,6 +12,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
 from src.utils.config_manager import ConfigManager
+import httpx
 
 router = APIRouter()
 config_manager = ConfigManager()
@@ -594,3 +595,79 @@ async def test_env_config():
         results["tts"]["error"] = str(e)
 
     return results
+
+
+# ==================== Model List & Selection (Ollama/local) ====================
+
+
+@router.get("/models")
+async def list_models():
+    """
+    List available models for current binding.
+    For local Ollama, read models via native `/api/tags` or OpenAI-compatible `/v1/models`.
+    """
+    base_url = os.environ.get("LLM_BINDING_HOST", "")
+    binding = os.environ.get("LLM_BINDING", "openai").lower()
+
+    if not base_url and binding == "ollama":
+        base_url = "http://localhost:11434"
+
+    # Prefer native Ollama API when pointing to localhost:11434
+    try_native = "11434" in base_url
+    try:
+        models: list[dict[str, Any]] = []
+        if try_native:
+            endpoint = base_url.rstrip("/").replace("/v1", "") + "/api/tags"
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(endpoint)
+                resp.raise_for_status()
+                data = resp.json()
+                for item in data.get("models", []):
+                    models.append(
+                        {
+                            "name": item.get("name"),
+                            "size": item.get("size", 0),
+                            "digest": item.get("digest", ""),
+                            "modified_at": item.get("modified_at", ""),
+                            "source": "ollama-native",
+                        }
+                    )
+        else:
+            # OpenAI-compatible list
+            endpoint = base_url.rstrip("/") + "/models"
+            headers = {}
+            api_key = os.environ.get("LLM_BINDING_API_KEY", "")
+            if api_key:
+                headers["Authorization"] = f"Bearer {api_key}"
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                resp = await client.get(endpoint, headers=headers)
+                resp.raise_for_status()
+                data = resp.json()
+                for item in data.get("data", []):
+                    models.append(
+                        {
+                            "name": item.get("id"),
+                            "created": item.get("created"),
+                            "source": "openai-compatible",
+                        }
+                    )
+        return {"models": models, "binding": binding, "base_url": base_url}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"Failed to list models: {e}")
+
+
+class SetModelRequest(BaseModel):
+    model: str
+
+
+@router.post("/model")
+async def set_active_model(req: SetModelRequest):
+    """
+    Set active LLM model at runtime.
+    """
+    model = req.model.strip()
+    if not model:
+        raise HTTPException(status_code=400, detail="Model name cannot be empty")
+
+    os.environ["LLM_MODEL"] = model
+    return {"success": True, "model": model}
